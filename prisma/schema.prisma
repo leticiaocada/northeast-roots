@@ -1,0 +1,273 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Perfil {
+  CLIENTE
+  ATENDENTE
+  COZINHA
+  GERENTE
+  ADMIN
+}
+
+enum CanalPedido {
+  APP
+  TOTEM
+  BALCAO
+  PICKUP
+  WEB
+}
+
+enum StatusPedido {
+  AGUARDANDO_PAGAMENTO
+  RECEBIDO
+  EM_PREPARO
+  PRONTO
+  ENTREGUE
+  CANCELADO
+}
+
+enum FormaPagamento {
+  PIX
+  CARTAO_CREDITO
+  CARTAO_DEBITO
+  DINHEIRO
+  MOCK
+}
+
+enum StatusPagamento {
+  APROVADO
+  RECUSADO
+  FALHA
+  ESTORNADO
+}
+
+enum TipoMovimentacaoEstoque {
+  ENTRADA
+  SAIDA
+}
+
+enum TipoMovimentacaoFidelidade {
+  CREDITO
+  DEBITO
+}
+
+model Usuario {
+  id            Int       @id @default(autoincrement())
+  nome          String
+  email         String    @unique
+  senhaHash     String    @map("senha_hash")
+  perfil        Perfil    @default(CLIENTE)
+  unidadeId     Int?      @map("unidade_id")
+  ativo         Boolean   @default(true)
+  anonimizadoEm DateTime? @map("anonimizado_em")
+  criadoEm      DateTime  @default(now()) @map("criado_em")
+  atualizadoEm  DateTime  @updatedAt @map("atualizado_em")
+
+  unidade              Unidade?              @relation(fields: [unidadeId], references: [id])
+  cliente              Cliente?
+  pedidosCriados       Pedido[]
+  movimentacoesEstoque MovimentacaoEstoque[]
+  logsAuditoria        LogAuditoria[]
+
+  @@map("usuarios")
+}
+
+model Cliente {
+  id                      Int       @id @default(autoincrement())
+  usuarioId               Int       @unique @map("usuario_id")
+  telefone                String?
+  pontosFidelidade        Int       @default(0) @map("pontos_fidelidade")
+  consentimentoFidelidade Boolean   @default(false) @map("consentimento_fidelidade")
+  dataConsentimento       DateTime? @map("data_consentimento")
+  criadoEm                DateTime  @default(now()) @map("criado_em")
+
+  usuario                 Usuario                  @relation(fields: [usuarioId], references: [id])
+  pedidos                 Pedido[]
+  movimentacoesFidelidade MovimentacaoFidelidade[]
+
+  @@map("clientes")
+}
+
+model Unidade {
+  id           Int      @id @default(autoincrement())
+  nome         String
+  cep          String
+  cidade       String
+  estado       String   @db.Char(2)
+  ativa        Boolean  @default(true)
+  criadoEm     DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  usuarios  Usuario[]
+  estoques  Estoque[]
+  pedidos   Pedido[]
+  promocoes Promocao[]
+
+  @@map("unidades")
+}
+
+model Produto {
+  id           Int      @id @default(autoincrement())
+  nome         String
+  descricao    String?
+  preco        Decimal  @db.Decimal(10, 2)
+  categoria    String
+  ativo        Boolean  @default(true)
+  criadoEm     DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  estoques    Estoque[]
+  itensPedido ItemPedido[]
+  promocoes   Promocao[]
+
+  @@map("produtos")
+}
+
+model Estoque {
+  id           Int      @id @default(autoincrement())
+  unidadeId    Int      @map("unidade_id")
+  produtoId    Int      @map("produto_id")
+  quantidade   Int      @default(0)
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  unidade       Unidade               @relation(fields: [unidadeId], references: [id])
+  produto       Produto               @relation(fields: [produtoId], references: [id])
+  movimentacoes MovimentacaoEstoque[]
+
+  @@unique([unidadeId, produtoId])
+  @@map("estoques")
+}
+
+model MovimentacaoEstoque {
+  id         Int                     @id @default(autoincrement())
+  estoqueId  Int                     @map("estoque_id")
+  tipo       TipoMovimentacaoEstoque
+  quantidade Int
+  motivo     String
+  usuarioId  Int?                    @map("usuario_id")
+  pedidoId   Int?                    @map("pedido_id")
+  criadoEm   DateTime                @default(now()) @map("criado_em")
+
+  estoque Estoque  @relation(fields: [estoqueId], references: [id])
+  usuario Usuario? @relation(fields: [usuarioId], references: [id])
+  pedido  Pedido?  @relation(fields: [pedidoId], references: [id])
+
+  @@map("movimentacoes_estoque")
+}
+
+model Pedido {
+  id             Int            @id @default(autoincrement())
+  clienteId      Int?           @map("cliente_id")
+  unidadeId      Int            @map("unidade_id")
+  canalPedido    CanalPedido    @map("canal_pedido")
+  status         StatusPedido   @default(AGUARDANDO_PAGAMENTO)
+  formaPagamento FormaPagamento @map("forma_pagamento")
+  subtotal       Decimal        @db.Decimal(10, 2)
+  desconto       Decimal        @default(0) @db.Decimal(10, 2)
+  total          Decimal        @db.Decimal(10, 2)
+  pontosUsados   Int            @default(0) @map("pontos_usados")
+  observacao     String?
+  criadoPorId    Int            @map("criado_por_id")
+  criadoEm       DateTime       @default(now()) @map("criado_em")
+  atualizadoEm   DateTime       @updatedAt @map("atualizado_em")
+
+  cliente                 Cliente?                 @relation(fields: [clienteId], references: [id])
+  unidade                 Unidade                  @relation(fields: [unidadeId], references: [id])
+  criadoPor               Usuario                  @relation(fields: [criadoPorId], references: [id])
+  itens                   ItemPedido[]
+  pagamentos              Pagamento[]
+  movimentacoesEstoque    MovimentacaoEstoque[]
+  movimentacoesFidelidade MovimentacaoFidelidade[]
+
+  @@index([canalPedido])
+  @@index([status])
+  @@index([unidadeId])
+  @@map("pedidos")
+}
+
+model ItemPedido {
+  id            Int     @id @default(autoincrement())
+  pedidoId      Int     @map("pedido_id")
+  produtoId     Int     @map("produto_id")
+  promocaoId    Int?    @map("promocao_id")
+  quantidade    Int
+  precoUnitario Decimal @map("preco_unitario") @db.Decimal(10, 2)
+  desconto      Decimal @default(0) @db.Decimal(10, 2)
+
+  pedido   Pedido    @relation(fields: [pedidoId], references: [id])
+  produto  Produto   @relation(fields: [produtoId], references: [id])
+  promocao Promocao? @relation(fields: [promocaoId], references: [id])
+
+  @@map("itens_pedido")
+}
+
+model Pagamento {
+  id              Int             @id @default(autoincrement())
+  pedidoId        Int             @map("pedido_id")
+  valor           Decimal         @db.Decimal(10, 2)
+  formaPagamento  FormaPagamento  @map("forma_pagamento")
+  status          StatusPagamento
+  codigoTransacao String?         @map("codigo_transacao")
+  mensagem        String
+  respostaGateway Json?           @map("resposta_gateway")
+  criadoEm        DateTime        @default(now()) @map("criado_em")
+
+  pedido Pedido @relation(fields: [pedidoId], references: [id])
+
+  @@index([pedidoId])
+  @@map("pagamentos")
+}
+
+model MovimentacaoFidelidade {
+  id        Int                        @id @default(autoincrement())
+  clienteId Int                        @map("cliente_id")
+  pedidoId  Int?                       @map("pedido_id")
+  tipo      TipoMovimentacaoFidelidade
+  pontos    Int
+  descricao String
+  criadoEm  DateTime                   @default(now()) @map("criado_em")
+
+  cliente Cliente @relation(fields: [clienteId], references: [id])
+  pedido  Pedido? @relation(fields: [pedidoId], references: [id])
+
+  @@map("movimentacoes_fidelidade")
+}
+
+model Promocao {
+  id                 Int      @id @default(autoincrement())
+  nome               String
+  produtoId          Int      @map("produto_id")
+  unidadeId          Int?     @map("unidade_id")
+  percentualDesconto Int      @map("percentual_desconto")
+  dataInicio         DateTime @map("data_inicio")
+  dataFim            DateTime @map("data_fim")
+  ativa              Boolean  @default(true)
+  criadoEm           DateTime @default(now()) @map("criado_em")
+
+  produto     Produto      @relation(fields: [produtoId], references: [id])
+  unidade     Unidade?     @relation(fields: [unidadeId], references: [id])
+  itensPedido ItemPedido[]
+
+  @@map("promocoes")
+}
+
+model LogAuditoria {
+  id         Int      @id @default(autoincrement())
+  usuarioId  Int?     @map("usuario_id")
+  acao       String
+  entidade   String
+  entidadeId Int?     @map("entidade_id")
+  detalhes   Json?
+  criadoEm   DateTime @default(now()) @map("criado_em")
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id])
+
+  @@index([entidade, entidadeId])
+  @@map("logs_auditoria")
+}

@@ -1,4 +1,21 @@
 services:
+  banco:
+    image: postgres:16-alpine
+    container_name: raizes-banco
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: raizes_nordeste
+    ports:
+      - "5432:5432"
+    volumes:
+      - dados_banco:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d raizes_nordeste"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build: .
     container_name: raizes-api
@@ -6,3 +23,10 @@ services:
       - "3000:3000"
     environment:
       PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@banco:5432/raizes_nordeste?schema=public
+    depends_on:
+      banco:
+        condition: service_healthy
+
+volumes:
+  dados_banco:

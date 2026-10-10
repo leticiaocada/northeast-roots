@@ -16,6 +16,12 @@ export const unidadeController = {
     res.json(unidade)
   },
 
+  async buscarCardapio(req: Request, res: Response) {
+    const { id } = idParametroSchema.parse(req.params)
+    const cardapio = await unidadeService.buscarCardapio(id)
+    res.json(cardapio)
+  },
+
   async criar(req: Request, res: Response) {
     const dados = unidadeSchema.parse(req.body ?? {})
     const unidade = await unidadeService.criar(dados, req.usuario!)

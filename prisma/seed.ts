@@ -89,6 +89,34 @@ async function main() {
     }
   })
 
+  const inicioPromocao = new Date()
+  inicioPromocao.setDate(inicioPromocao.getDate() - 1)
+  const fimPromocao = new Date()
+  fimPromocao.setFullYear(fimPromocao.getFullYear() + 1)
+
+  const cocada = produtos.find((produto) => produto.nome === 'Cocada')!
+  const sucoDeCaja = produtos.find((produto) => produto.nome === 'Suco de Cajá')!
+
+  await prisma.promocao.create({
+    data: {
+      nome: 'Cocada com 20% de desconto em toda a rede',
+      produtoId: cocada.id,
+      percentualDesconto: 20,
+      dataInicio: inicioPromocao,
+      dataFim: fimPromocao
+    }
+  })
+  await prisma.promocao.create({
+    data: {
+      nome: 'Suco de Cajá com 10% de desconto em Recife',
+      produtoId: sucoDeCaja.id,
+      unidadeId: recife.id,
+      percentualDesconto: 10,
+      dataInicio: inicioPromocao,
+      dataFim: fimPromocao
+    }
+  })
+
   console.log('Seed aplicado com sucesso.')
 }
 

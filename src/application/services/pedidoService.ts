@@ -4,6 +4,7 @@ import { CanalPedido, FormaPagamento, StatusPedido } from '../../domain/enums'
 import { temQuantidadeSuficiente } from '../../domain/estoque'
 import { calcularDescontoDosPontos, validarResgateDePontos } from '../../domain/fidelidade'
 import { calcularValoresDoPedido, podeSerCancelado, validarMudancaDeStatus } from '../../domain/pedido'
+import { calcularDescontoPromocional, escolherMelhorPromocao } from '../../domain/promocao'
 import { UsuarioLogado } from '../../domain/usuario'
 import { executarTransacao } from '../../infrastructure/banco/prisma'
 import { clienteRepositorio } from '../../infrastructure/repositorios/clienteRepositorio'
@@ -15,6 +16,7 @@ import { calcularPulo, montarPaginacao } from '../paginacao'
 import { verificarAcessoUnidade } from '../permissoes'
 import { auditoriaService } from './auditoriaService'
 import { fidelidadeService } from './fidelidadeService'
+import { promocaoService } from './promocaoService'
 import { unidadeService } from './unidadeService'
 
 type DadosNovoPedido = {
@@ -130,6 +132,7 @@ export const pedidoService = {
     }
 
     const cliente = await buscarClienteDoPedido(dados.clienteId, usuario)
+    const promocoes = await promocaoService.buscarVigentesDaUnidade(dados.unidadeId)
 
     const itensCalculados: ItemDoPedido[] = []
     const errosEstoque: DetalheErro[] = []
@@ -152,13 +155,19 @@ export const pedidoService = {
         continue
       }
 
+      const precoCentavos = paraCentavos(Number(produto.preco))
+      const promocao = escolherMelhorPromocao(promocoes, item.produtoId)
+      const descontoCentavos = promocao
+        ? calcularDescontoPromocional(precoCentavos, promocao.percentualDesconto) * item.quantidade
+        : 0
+
       itensCalculados.push({
         produtoId: item.produtoId,
         estoqueId: estoque.id,
         quantidade: item.quantidade,
-        precoCentavos: paraCentavos(Number(produto.preco)),
-        descontoCentavos: 0,
-        promocaoId: null
+        precoCentavos,
+        descontoCentavos,
+        promocaoId: promocao ? promocao.id : null
       })
     }
 

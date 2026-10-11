@@ -7,6 +7,7 @@ import { UsuarioLogado } from '../../domain/usuario'
 import { executarTransacao } from '../../infrastructure/banco/prisma'
 import { clienteRepositorio } from '../../infrastructure/repositorios/clienteRepositorio'
 import { estoqueRepositorio } from '../../infrastructure/repositorios/estoqueRepositorio'
+import { pagamentoRepositorio } from '../../infrastructure/repositorios/pagamentoRepositorio'
 import { pedidoRepositorio } from '../../infrastructure/repositorios/pedidoRepositorio'
 import { produtoRepositorio } from '../../infrastructure/repositorios/produtoRepositorio'
 import { calcularPulo, montarPaginacao } from '../paginacao'
@@ -315,13 +316,19 @@ export const pedidoService = {
         )
       }
 
+      let pagamentoEstornado = false
+      if (pedido.status === 'RECEBIDO') {
+        const resultado = await pagamentoRepositorio.marcarComoEstornado(id, tx)
+        pagamentoEstornado = resultado.count > 0
+      }
+
       await auditoriaService.registrar(
         {
           usuarioId: usuario.id,
           acao: 'PEDIDO_CANCELADO',
           entidade: 'pedido',
           entidadeId: id,
-          detalhes: { statusAnterior: pedido.status, motivo: motivo ?? null }
+          detalhes: { statusAnterior: pedido.status, motivo: motivo ?? null, pagamentoEstornado }
         },
         tx
       )

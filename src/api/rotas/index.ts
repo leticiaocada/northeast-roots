@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { auditoriaRotas } from './auditoriaRotas'
 import { authRotas } from './authRotas'
 import { estoqueRotas } from './estoqueRotas'
+import { fidelidadeRotas } from './fidelidadeRotas'
 import { pagamentoRotas } from './pagamentoRotas'
 import { pedidoRotas } from './pedidoRotas'
 import { produtoRotas } from './produtoRotas'
@@ -21,4 +22,5 @@ rotas.use('/produtos', produtoRotas)
 rotas.use('/estoque', estoqueRotas)
 rotas.use('/pedidos', pedidoRotas)
 rotas.use('/pagamentos', pagamentoRotas)
+rotas.use('/fidelidade', fidelidadeRotas)
 rotas.use('/auditoria', auditoriaRotas)

@@ -1,5 +1,6 @@
 import { Pagamento } from '@prisma/client'
 import { ErroAplicacao } from '../../domain/ErroAplicacao'
+import { paraCentavos } from '../../domain/dinheiro'
 import { SimulacaoPagamento } from '../../domain/enums'
 import { podeReceberPagamento } from '../../domain/pedido'
 import { UsuarioLogado } from '../../domain/usuario'
@@ -9,6 +10,7 @@ import { gatewayPagamentoMock, RespostaGateway } from '../../infrastructure/paga
 import { pagamentoRepositorio } from '../../infrastructure/repositorios/pagamentoRepositorio'
 import { pedidoRepositorio } from '../../infrastructure/repositorios/pedidoRepositorio'
 import { auditoriaService } from './auditoriaService'
+import { fidelidadeService } from './fidelidadeService'
 import { pedidoService } from './pedidoService'
 
 function formatarPagamento(pagamento: Pagamento) {
@@ -96,7 +98,7 @@ export const pagamentoService = {
       ])
     }
 
-    const pagamento = await executarTransacao(async (tx) => {
+    const resultado = await executarTransacao(async (tx) => {
       const atualizou = await pedidoRepositorio.atualizarStatus(pedidoId, 'AGUARDANDO_PAGAMENTO', 'RECEBIDO', tx)
 
       if (!atualizou) {
@@ -116,13 +118,18 @@ export const pagamentoService = {
         tx
       )
 
+      let pontosGanhos = 0
+      if (pedido.clienteId) {
+        pontosGanhos = await fidelidadeService.creditarPontosDoPedido(pedido.clienteId, pedidoId, paraCentavos(valor), tx)
+      }
+
       await auditoriaService.registrar(
         {
           usuarioId: usuario.id,
           acao: 'PAGAMENTO_APROVADO',
           entidade: 'pedido',
           entidadeId: pedidoId,
-          detalhes: { pagamentoId: pagamentoAprovado.id, valor }
+          detalhes: { pagamentoId: pagamentoAprovado.id, valor, pontosGanhos }
         },
         tx
       )
@@ -138,12 +145,13 @@ export const pagamentoService = {
         tx
       )
 
-      return pagamentoAprovado
+      return { pagamentoAprovado, pontosGanhos }
     })
 
     return {
-      pagamento: formatarPagamento(pagamento),
+      pagamento: formatarPagamento(resultado.pagamentoAprovado),
       pedido: { id: pedidoId, status: 'RECEBIDO' },
+      pontosGanhos: resultado.pontosGanhos,
       respostaGateway: resposta
     }
   },

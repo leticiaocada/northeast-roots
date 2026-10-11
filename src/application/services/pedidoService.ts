@@ -2,6 +2,7 @@ import { DetalheErro, ErroAplicacao } from '../../domain/ErroAplicacao'
 import { paraCentavos, paraReais } from '../../domain/dinheiro'
 import { CanalPedido, FormaPagamento, StatusPedido } from '../../domain/enums'
 import { temQuantidadeSuficiente } from '../../domain/estoque'
+import { calcularDescontoDosPontos, validarResgateDePontos } from '../../domain/fidelidade'
 import { calcularValoresDoPedido, podeSerCancelado, validarMudancaDeStatus } from '../../domain/pedido'
 import { UsuarioLogado } from '../../domain/usuario'
 import { executarTransacao } from '../../infrastructure/banco/prisma'
@@ -13,6 +14,7 @@ import { produtoRepositorio } from '../../infrastructure/repositorios/produtoRep
 import { calcularPulo, montarPaginacao } from '../paginacao'
 import { verificarAcessoUnidade } from '../permissoes'
 import { auditoriaService } from './auditoriaService'
+import { fidelidadeService } from './fidelidadeService'
 import { unidadeService } from './unidadeService'
 
 type DadosNovoPedido = {
@@ -21,6 +23,7 @@ type DadosNovoPedido = {
   clienteId?: number
   formaPagamento: FormaPagamento
   observacao?: string
+  pontosResgatados?: number
   itens: { produtoId: number; quantidade: number }[]
 }
 
@@ -163,7 +166,19 @@ export const pedidoService = {
       throw new ErroAplicacao(409, 'ESTOQUE_INSUFICIENTE', 'Não há quantidade suficiente para um ou mais itens.', errosEstoque)
     }
 
-    const valores = calcularValoresDoPedido(itensCalculados, 0)
+    const pontosResgatados = dados.pontosResgatados ?? 0
+
+    if (pontosResgatados > 0) {
+      if (!cliente) {
+        throw new ErroAplicacao(422, 'CLIENTE_OBRIGATORIO_PARA_RESGATE', 'Para resgatar pontos o pedido precisa estar vinculado a um cliente.', [
+          { field: 'clienteId', issue: 'Informe o cliente que vai usar os pontos.' }
+        ])
+      }
+
+      validarResgateDePontos(cliente.pontosFidelidade, pontosResgatados, cliente.consentimentoFidelidade)
+    }
+
+    const valores = calcularValoresDoPedido(itensCalculados, calcularDescontoDosPontos(pontosResgatados))
 
     const pedido = await executarTransacao(async (tx) => {
       const novoPedido = await pedidoRepositorio.criar(
@@ -175,7 +190,7 @@ export const pedidoService = {
           subtotal: paraReais(valores.subtotalCentavos),
           desconto: paraReais(valores.descontoCentavos),
           total: paraReais(valores.totalCentavos),
-          pontosUsados: 0,
+          pontosUsados: pontosResgatados,
           observacao: dados.observacao,
           criadoPorId: usuario.id,
           itens: itensCalculados.map((item) => ({
@@ -209,6 +224,10 @@ export const pedidoService = {
         )
       }
 
+      if (cliente && pontosResgatados > 0) {
+        await fidelidadeService.debitarPontosDoPedido(cliente.id, novoPedido.id, pontosResgatados, tx)
+      }
+
       await auditoriaService.registrar(
         {
           usuarioId: usuario.id,
@@ -218,7 +237,8 @@ export const pedidoService = {
           detalhes: {
             canalPedido: novoPedido.canalPedido,
             unidadeId: novoPedido.unidadeId,
-            total: Number(novoPedido.total)
+            total: Number(novoPedido.total),
+            pontosResgatados
           }
         },
         tx
@@ -320,6 +340,10 @@ export const pedidoService = {
       if (pedido.status === 'RECEBIDO') {
         const resultado = await pagamentoRepositorio.marcarComoEstornado(id, tx)
         pagamentoEstornado = resultado.count > 0
+      }
+
+      if (pedido.clienteId) {
+        await fidelidadeService.estornarPontosDoPedido(pedido.clienteId, id, tx)
       }
 
       await auditoriaService.registrar(

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { authRotas } from './authRotas'
 import { estoqueRotas } from './estoqueRotas'
+import { pedidoRotas } from './pedidoRotas'
 import { produtoRotas } from './produtoRotas'
 import { unidadeRotas } from './unidadeRotas'
 import { usuarioRotas } from './usuarioRotas'
@@ -16,3 +17,4 @@ rotas.use('/usuarios', usuarioRotas)
 rotas.use('/unidades', unidadeRotas)
 rotas.use('/produtos', produtoRotas)
 rotas.use('/estoque', estoqueRotas)
+rotas.use('/pedidos', pedidoRotas)

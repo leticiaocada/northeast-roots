@@ -11,3 +11,6 @@ export type StatusPedido = (typeof STATUS_PEDIDO)[number]
 
 export const FORMAS_PAGAMENTO = ['PIX', 'CARTAO_CREDITO', 'CARTAO_DEBITO', 'DINHEIRO', 'MOCK'] as const
 export type FormaPagamento = (typeof FORMAS_PAGAMENTO)[number]
+
+export const SIMULACOES_PAGAMENTO = ['APROVAR', 'RECUSAR', 'FALHAR'] as const
+export type SimulacaoPagamento = (typeof SIMULACOES_PAGAMENTO)[number]

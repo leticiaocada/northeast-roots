@@ -1,7 +1,10 @@
 import { ErroAplicacao } from '../../domain/ErroAplicacao'
+import { paraCentavos, paraReais } from '../../domain/dinheiro'
 import { estaDisponivel } from '../../domain/estoque'
+import { calcularDescontoPromocional, escolherMelhorPromocao } from '../../domain/promocao'
 import { UsuarioLogado } from '../../domain/usuario'
 import { estoqueRepositorio } from '../../infrastructure/repositorios/estoqueRepositorio'
+import { promocaoRepositorio } from '../../infrastructure/repositorios/promocaoRepositorio'
 import { unidadeRepositorio } from '../../infrastructure/repositorios/unidadeRepositorio'
 import { calcularPulo, montarPaginacao } from '../paginacao'
 import { auditoriaService } from './auditoriaService'
@@ -45,18 +48,29 @@ export const unidadeService = {
   async buscarCardapio(id: number) {
     const unidade = await buscarUnidadeAtiva(id)
     const estoques = await estoqueRepositorio.listarCardapio(id)
+    const promocoes = await promocaoRepositorio.listarVigentesDaUnidade(id, new Date())
 
     return {
       unidade: { id: unidade.id, nome: unidade.nome },
-      itens: estoques.map((estoque) => ({
-        produtoId: estoque.produtoId,
-        nome: estoque.produto.nome,
-        descricao: estoque.produto.descricao,
-        categoria: estoque.produto.categoria,
-        preco: Number(estoque.produto.preco),
-        disponivel: estaDisponivel(estoque.quantidade),
-        quantidadeDisponivel: estoque.quantidade
-      }))
+      itens: estoques.map((estoque) => {
+        const precoCentavos = paraCentavos(Number(estoque.produto.preco))
+        const promocao = escolherMelhorPromocao(promocoes, estoque.produtoId)
+        const precoPromocionalCentavos = promocao
+          ? precoCentavos - calcularDescontoPromocional(precoCentavos, promocao.percentualDesconto)
+          : null
+
+        return {
+          produtoId: estoque.produtoId,
+          nome: estoque.produto.nome,
+          descricao: estoque.produto.descricao,
+          categoria: estoque.produto.categoria,
+          preco: paraReais(precoCentavos),
+          precoPromocional: precoPromocionalCentavos === null ? null : paraReais(precoPromocionalCentavos),
+          promocao: promocao ? { id: promocao.id, nome: promocao.nome, percentualDesconto: promocao.percentualDesconto } : null,
+          disponivel: estaDisponivel(estoque.quantidade),
+          quantidadeDisponivel: estoque.quantidade
+        }
+      })
     }
   },
 

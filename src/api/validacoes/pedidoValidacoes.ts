@@ -13,6 +13,7 @@ export const criarPedidoSchema = z
     clienteId: z.number().int().min(1).optional(),
     formaPagamento: z.enum(FORMAS_PAGAMENTO),
     observacao: z.string().trim().max(200).optional(),
+    pontosResgatados: z.number().int().min(0).optional(),
     itens: z
       .array(
         z.object({

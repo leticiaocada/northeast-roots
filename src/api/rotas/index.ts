@@ -2,8 +2,11 @@ import { Router } from 'express'
 import { auditoriaRotas } from './auditoriaRotas'
 import { authRotas } from './authRotas'
 import { estoqueRotas } from './estoqueRotas'
+import { fidelidadeRotas } from './fidelidadeRotas'
+import { pagamentoRotas } from './pagamentoRotas'
 import { pedidoRotas } from './pedidoRotas'
 import { produtoRotas } from './produtoRotas'
+import { promocaoRotas } from './promocaoRotas'
 import { unidadeRotas } from './unidadeRotas'
 import { usuarioRotas } from './usuarioRotas'
 
@@ -19,4 +22,7 @@ rotas.use('/unidades', unidadeRotas)
 rotas.use('/produtos', produtoRotas)
 rotas.use('/estoque', estoqueRotas)
 rotas.use('/pedidos', pedidoRotas)
+rotas.use('/pagamentos', pagamentoRotas)
+rotas.use('/fidelidade', fidelidadeRotas)
+rotas.use('/promocoes', promocaoRotas)
 rotas.use('/auditoria', auditoriaRotas)

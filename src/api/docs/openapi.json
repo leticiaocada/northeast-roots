@@ -1,0 +1,812 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Raízes do Nordeste - API",
+    "version": "1.0.0",
+    "description": "API back-end da rede de restaurantes Raízes do Nordeste. Fluxo principal: Pedido → Pagamento mock → Atualização de status.\n\nComo testar: faça login em POST /auth/login com um usuário do seed (senha Senha@123), copie o accessToken e clique em Authorize.\n\nUsuários do seed: admin@raizesdonordeste.com.br (ADMIN), gerente.recife@raizesdonordeste.com.br (GERENTE), atendente.recife@raizesdonordeste.com.br (ATENDENTE), cozinha.recife@raizesdonordeste.com.br (COZINHA), maria@cliente.com.br (CLIENTE).\n\nTodas as falhas seguem o mesmo formato de erro (schema Erro)."
+  },
+  "servers": [{ "url": "http://localhost:3000", "description": "Ambiente local" }],
+  "tags": [
+    { "name": "Auth", "description": "Autenticação" },
+    { "name": "Usuarios", "description": "Cadastro de clientes, funcionários e dados pessoais (LGPD)" },
+    { "name": "Unidades", "description": "Unidades da rede e cardápio por unidade" },
+    { "name": "Produtos", "description": "Catálogo de produtos da rede" },
+    { "name": "Estoque", "description": "Estoque por unidade, entradas e saídas" },
+    { "name": "Pedidos", "description": "Fluxo crítico: criação, consulta, status e cancelamento" },
+    { "name": "Pagamentos", "description": "Integração simulada (mock) com gateway de pagamento" },
+    { "name": "Fidelidade", "description": "Pontos, resgate e consentimento" },
+    { "name": "Promocoes", "description": "Promoções e campanhas" },
+    { "name": "Auditoria", "description": "Logs de ações sensíveis" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Verifica se a API está no ar",
+        "responses": { "200": { "description": "API no ar", "content": { "application/json": { "example": { "status": "ok", "data": "2026-10-12T12:00:00.000Z" } } } } }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Autentica o usuário e retorna o token JWT",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginRequest" }, "example": { "email": "maria@cliente.com.br", "senha": "Senha@123" } } }
+        },
+        "responses": {
+          "200": { "description": "Login realizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginResponse" } } } },
+          "401": {
+            "description": "Credenciais inválidas",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" }, "example": { "error": "CREDENCIAIS_INVALIDAS", "message": "E-mail ou senha inválidos.", "details": [], "timestamp": "2026-10-12T12:00:00.000Z", "path": "/auth/login", "requestId": "4f1c2a7e-0d7b-4a52-9a4e-2f3c0e9b1a11" } } }
+          },
+          "422": { "$ref": "#/components/responses/ErroValidacao" },
+          "429": { "description": "Muitas tentativas de login", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" } } } }
+        }
+      }
+    },
+    "/usuarios": {
+      "post": {
+        "tags": ["Usuarios"],
+        "summary": "Cadastra um cliente (público)",
+        "description": "O campo consentimentoFidelidade registra o consentimento LGPD para participar do programa de pontos. A data do consentimento é gravada.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CadastroCliente" }, "example": { "nome": "Ana Souza", "email": "ana@email.com", "senha": "Senha123", "telefone": "81988887777", "consentimentoFidelidade": true } } }
+        },
+        "responses": {
+          "201": { "description": "Cliente cadastrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Usuario" } } } },
+          "409": { "$ref": "#/components/responses/Conflito" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      },
+      "get": {
+        "tags": ["Usuarios"],
+        "summary": "Lista usuários (ADMIN). O acesso é registrado na auditoria",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/page" }, { "$ref": "#/components/parameters/limit" }],
+        "responses": {
+          "200": { "description": "Lista paginada", "content": { "application/json": { "schema": { "type": "object", "properties": { "dados": { "type": "array", "items": { "$ref": "#/components/schemas/UsuarioResumo" } }, "paginacao": { "$ref": "#/components/schemas/Paginacao" } } } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" }
+        }
+      }
+    },
+    "/usuarios/me": {
+      "get": {
+        "tags": ["Usuarios"],
+        "summary": "Retorna os dados do usuário logado",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Dados do usuário", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Usuario" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" }
+        }
+      },
+      "delete": {
+        "tags": ["Usuarios"],
+        "summary": "Anonimiza a conta do cliente logado (direito de eliminação - LGPD)",
+        "description": "Nome, e-mail, telefone e senha são substituídos. Os pedidos continuam no banco sem dados pessoais para fins fiscais.",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "204": { "description": "Conta anonimizada" },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" }
+        }
+      }
+    },
+    "/usuarios/funcionarios": {
+      "post": {
+        "tags": ["Usuarios"],
+        "summary": "Cadastra um funcionário (ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CadastroFuncionario" }, "example": { "nome": "Carlos Atendente", "email": "carlos@raizesdonordeste.com.br", "senha": "Senha123", "perfil": "ATENDENTE", "unidadeId": 1 } } }
+        },
+        "responses": {
+          "201": { "description": "Funcionário cadastrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Usuario" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "409": { "$ref": "#/components/responses/Conflito" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/unidades": {
+      "get": {
+        "tags": ["Unidades"],
+        "summary": "Lista unidades ativas (público)",
+        "parameters": [{ "$ref": "#/components/parameters/page" }, { "$ref": "#/components/parameters/limit" }],
+        "responses": {
+          "200": { "description": "Lista paginada", "content": { "application/json": { "schema": { "type": "object", "properties": { "dados": { "type": "array", "items": { "$ref": "#/components/schemas/Unidade" } }, "paginacao": { "$ref": "#/components/schemas/Paginacao" } } } } } },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      },
+      "post": {
+        "tags": ["Unidades"],
+        "summary": "Cria uma unidade (ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnidadeEntrada" }, "example": { "nome": "Raízes do Nordeste - João Pessoa", "cep": "58038-000", "cidade": "João Pessoa", "estado": "PB" } } } },
+        "responses": {
+          "201": { "description": "Unidade criada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Unidade" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/unidades/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["Unidades"],
+        "summary": "Busca uma unidade (público)",
+        "responses": {
+          "200": { "description": "Unidade", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Unidade" } } } },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" }
+        }
+      },
+      "put": {
+        "tags": ["Unidades"],
+        "summary": "Atualiza uma unidade (ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UnidadeEntrada" } } } },
+        "responses": {
+          "200": { "description": "Unidade atualizada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Unidade" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      },
+      "delete": {
+        "tags": ["Unidades"],
+        "summary": "Desativa uma unidade (ADMIN). Exclusão lógica para manter o histórico de pedidos",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "204": { "description": "Unidade desativada" },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" }
+        }
+      }
+    },
+    "/unidades/{id}/cardapio": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["Unidades"],
+        "summary": "Consulta o cardápio da unidade com disponibilidade e preço promocional (público)",
+        "responses": {
+          "200": { "description": "Cardápio", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Cardapio" } } } },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" }
+        }
+      }
+    },
+    "/produtos": {
+      "get": {
+        "tags": ["Produtos"],
+        "summary": "Lista produtos ativos (público)",
+        "parameters": [
+          { "$ref": "#/components/parameters/page" },
+          { "$ref": "#/components/parameters/limit" },
+          { "name": "categoria", "in": "query", "schema": { "type": "string", "example": "LANCHE" } }
+        ],
+        "responses": {
+          "200": { "description": "Lista paginada", "content": { "application/json": { "schema": { "type": "object", "properties": { "dados": { "type": "array", "items": { "$ref": "#/components/schemas/Produto" } }, "paginacao": { "$ref": "#/components/schemas/Paginacao" } } } } } }
+        }
+      },
+      "post": {
+        "tags": ["Produtos"],
+        "summary": "Cria um produto (ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProdutoEntrada" }, "example": { "nome": "Bolo de Rolo", "descricao": "Fatia de bolo de rolo pernambucano", "preco": 12.5, "categoria": "SOBREMESA" } } } },
+        "responses": {
+          "201": { "description": "Produto criado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Produto" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/produtos/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["Produtos"],
+        "summary": "Busca um produto (público)",
+        "responses": {
+          "200": { "description": "Produto", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Produto" } } } },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" }
+        }
+      },
+      "put": {
+        "tags": ["Produtos"],
+        "summary": "Atualiza um produto (ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProdutoEntrada" } } } },
+        "responses": {
+          "200": { "description": "Produto atualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Produto" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      },
+      "delete": {
+        "tags": ["Produtos"],
+        "summary": "Desativa um produto (ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "204": { "description": "Produto desativado" },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" }
+        }
+      }
+    },
+    "/estoque": {
+      "get": {
+        "tags": ["Estoque"],
+        "summary": "Consulta o saldo de estoque de uma unidade (GERENTE da unidade ou ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "unidadeId", "in": "query", "required": true, "schema": { "type": "integer", "example": 1 } },
+          { "$ref": "#/components/parameters/page" },
+          { "$ref": "#/components/parameters/limit" }
+        ],
+        "responses": {
+          "200": { "description": "Saldo por produto", "content": { "application/json": { "schema": { "type": "object", "properties": { "dados": { "type": "array", "items": { "$ref": "#/components/schemas/ItemEstoque" } }, "paginacao": { "$ref": "#/components/schemas/Paginacao" } } } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/estoque/entradas": {
+      "post": {
+        "tags": ["Estoque"],
+        "summary": "Registra entrada de estoque (GERENTE da unidade ou ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MovimentacaoEstoqueEntrada" }, "example": { "unidadeId": 1, "produtoId": 6, "quantidade": 10, "motivo": "Reposição semanal" } } } },
+        "responses": {
+          "201": { "description": "Entrada registrada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResultadoMovimentacao" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/estoque/saidas": {
+      "post": {
+        "tags": ["Estoque"],
+        "summary": "Registra saída de estoque, como perda ou validade (GERENTE da unidade ou ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MovimentacaoEstoqueEntrada" }, "example": { "unidadeId": 1, "produtoId": 6, "quantidade": 1, "motivo": "Perda por validade" } } } },
+        "responses": {
+          "201": { "description": "Saída registrada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResultadoMovimentacao" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "409": { "$ref": "#/components/responses/Conflito" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/estoque/movimentacoes": {
+      "get": {
+        "tags": ["Estoque"],
+        "summary": "Histórico de movimentações de estoque da unidade",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "unidadeId", "in": "query", "required": true, "schema": { "type": "integer", "example": 1 } },
+          { "$ref": "#/components/parameters/page" },
+          { "$ref": "#/components/parameters/limit" }
+        ],
+        "responses": {
+          "200": { "description": "Lista paginada de movimentações" },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" }
+        }
+      }
+    },
+    "/pedidos": {
+      "post": {
+        "tags": ["Pedidos"],
+        "summary": "Cria um pedido (fluxo crítico)",
+        "description": "Valida unidade, produtos e estoque da unidade, aplica promoções vigentes e resgate de pontos, calcula o total e baixa o estoque em uma transação. O campo canalPedido é obrigatório.\n\nPerfis: CLIENTE (o pedido é vinculado ao próprio cliente), ATENDENTE e GERENTE (somente na sua unidade, podem informar clienteId) e ADMIN.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CriarPedido" }, "example": { "unidadeId": 1, "canalPedido": "TOTEM", "formaPagamento": "MOCK", "itens": [{ "produtoId": 1, "quantidade": 2 }, { "produtoId": 2, "quantidade": 1 }] } } }
+        },
+        "responses": {
+          "201": { "description": "Pedido criado com status AGUARDANDO_PAGAMENTO", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "409": {
+            "description": "Estoque insuficiente ou regra de pontos",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" }, "example": { "error": "ESTOQUE_INSUFICIENTE", "message": "Não há quantidade suficiente para um ou mais itens.", "details": [{ "field": "itens[0].quantidade", "issue": "Disponível: 3" }], "timestamp": "2026-10-12T12:00:00.000Z", "path": "/pedidos", "requestId": "4f1c2a7e-0d7b-4a52-9a4e-2f3c0e9b1a11" } } }
+          },
+          "422": {
+            "description": "Dados inválidos (ex.: canalPedido ausente)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" }, "example": { "error": "VALIDACAO", "message": "Os dados enviados são inválidos.", "details": [{ "field": "canalPedido", "issue": "canalPedido é obrigatório. Valores aceitos: APP, TOTEM, BALCAO, PICKUP, WEB." }], "timestamp": "2026-10-12T12:00:00.000Z", "path": "/pedidos", "requestId": "4f1c2a7e-0d7b-4a52-9a4e-2f3c0e9b1a11" } } }
+          }
+        }
+      },
+      "get": {
+        "tags": ["Pedidos"],
+        "summary": "Lista pedidos com filtros por canal, status e unidade",
+        "description": "CLIENTE vê apenas os próprios pedidos. ATENDENTE, COZINHA e GERENTE veem apenas os pedidos da sua unidade. ADMIN vê todos.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "canalPedido", "in": "query", "schema": { "$ref": "#/components/schemas/CanalPedido" } },
+          { "name": "status", "in": "query", "schema": { "$ref": "#/components/schemas/StatusPedido" } },
+          { "name": "unidadeId", "in": "query", "schema": { "type": "integer" } },
+          { "$ref": "#/components/parameters/page" },
+          { "$ref": "#/components/parameters/limit" }
+        ],
+        "responses": {
+          "200": { "description": "Lista paginada", "content": { "application/json": { "schema": { "type": "object", "properties": { "dados": { "type": "array", "items": { "$ref": "#/components/schemas/Pedido" } }, "paginacao": { "$ref": "#/components/schemas/Paginacao" } } } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/pedidos/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["Pedidos"],
+        "summary": "Consulta um pedido",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Pedido", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" }
+        }
+      }
+    },
+    "/pedidos/{id}/status": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "patch": {
+        "tags": ["Pedidos"],
+        "summary": "Atualiza o status do pedido",
+        "description": "Transições: RECEBIDO → EM_PREPARO → PRONTO → ENTREGUE.\n\nEM_PREPARO e PRONTO: COZINHA, GERENTE ou ADMIN. ENTREGUE: ATENDENTE, GERENTE ou ADMIN. RECEBIDO é definido pelo pagamento aprovado e CANCELADO pela rota de cancelamento.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AtualizarStatus" }, "example": { "status": "EM_PREPARO" } } } },
+        "responses": {
+          "200": { "description": "Status atualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "409": { "$ref": "#/components/responses/Conflito" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/pedidos/{id}/cancelar": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "patch": {
+        "tags": ["Pedidos"],
+        "summary": "Cancela o pedido (antes de entrar em preparo)",
+        "description": "Devolve os itens ao estoque, estorna o pagamento aprovado (se houver) e devolve ou estorna os pontos de fidelidade.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CancelarPedido" }, "example": { "motivo": "Cliente desistiu" } } } },
+        "responses": {
+          "200": { "description": "Pedido cancelado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pedido" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "409": { "$ref": "#/components/responses/Conflito" }
+        }
+      }
+    },
+    "/pagamentos": {
+      "post": {
+        "tags": ["Pagamentos"],
+        "summary": "Solicita o pagamento do pedido ao gateway externo (mock)",
+        "description": "O campo simulacao controla a resposta do gateway mock: APROVAR (padrão), RECUSAR ou FALHAR.\n\nAPROVAR: 201, o pagamento é registrado, o pedido vai para RECEBIDO e o cliente ganha pontos (se consentiu).\n\nRECUSAR: 402, o pagamento é registrado como RECUSADO e o pedido continua AGUARDANDO_PAGAMENTO.\n\nFALHAR: 503, simula indisponibilidade do gateway, o pagamento é registrado como FALHA e o pedido não é alterado.\n\nPedido já pago: 409 (idempotência).",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SolicitarPagamento" }, "example": { "pedidoId": 1, "simulacao": "APROVAR" } } } },
+        "responses": {
+          "201": { "description": "Pagamento aprovado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResultadoPagamento" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "402": {
+            "description": "Pagamento recusado pelo gateway",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" }, "example": { "error": "PAGAMENTO_RECUSADO", "message": "Pagamento recusado pela operadora: saldo ou limite insuficiente.", "details": [{ "field": "pagamentoId", "issue": "Pagamento 2 registrado como RECUSADO." }, { "field": "pedido.status", "issue": "O pedido continua AGUARDANDO_PAGAMENTO e pode receber nova tentativa." }], "timestamp": "2026-10-12T12:00:00.000Z", "path": "/pagamentos", "requestId": "4f1c2a7e-0d7b-4a52-9a4e-2f3c0e9b1a11" } } }
+          },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "409": { "$ref": "#/components/responses/Conflito" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" },
+          "503": { "description": "Gateway indisponível", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" } } } }
+        }
+      },
+      "get": {
+        "tags": ["Pagamentos"],
+        "summary": "Lista as tentativas de pagamento de um pedido",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "pedidoId", "in": "query", "required": true, "schema": { "type": "integer", "example": 1 } }],
+        "responses": {
+          "200": { "description": "Pagamentos do pedido", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Pagamento" } } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" }
+        }
+      }
+    },
+    "/fidelidade/saldo": {
+      "get": {
+        "tags": ["Fidelidade"],
+        "summary": "Consulta o saldo de pontos do cliente logado (CLIENTE)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Saldo", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaldoFidelidade" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" }
+        }
+      }
+    },
+    "/fidelidade/historico": {
+      "get": {
+        "tags": ["Fidelidade"],
+        "summary": "Histórico de créditos e débitos de pontos (CLIENTE)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/page" }, { "$ref": "#/components/parameters/limit" }],
+        "responses": {
+          "200": { "description": "Lista paginada", "content": { "application/json": { "schema": { "type": "object", "properties": { "dados": { "type": "array", "items": { "$ref": "#/components/schemas/MovimentacaoFidelidade" } }, "paginacao": { "$ref": "#/components/schemas/Paginacao" } } } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" }
+        }
+      }
+    },
+    "/fidelidade/consentimento": {
+      "patch": {
+        "tags": ["Fidelidade"],
+        "summary": "Concede ou revoga o consentimento LGPD para o programa de fidelidade (CLIENTE)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["consentimento"], "properties": { "consentimento": { "type": "boolean" } } }, "example": { "consentimento": true } } } },
+        "responses": {
+          "200": { "description": "Consentimento atualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SaldoFidelidade" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/promocoes": {
+      "get": {
+        "tags": ["Promocoes"],
+        "summary": "Lista promoções vigentes (público)",
+        "parameters": [{ "$ref": "#/components/parameters/page" }, { "$ref": "#/components/parameters/limit" }],
+        "responses": { "200": { "description": "Lista paginada" } }
+      },
+      "post": {
+        "tags": ["Promocoes"],
+        "summary": "Cria uma promoção (ADMIN). Sem unidadeId vale para toda a rede",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PromocaoEntrada" }, "example": { "nome": "Baião da semana", "produtoId": 1, "unidadeId": 1, "percentualDesconto": 15, "dataInicio": "2026-10-01", "dataFim": "2026-12-31" } } } },
+        "responses": {
+          "201": { "description": "Promoção criada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Promocao" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" },
+          "422": { "$ref": "#/components/responses/ErroValidacao" }
+        }
+      }
+    },
+    "/promocoes/{id}/desativar": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "patch": {
+        "tags": ["Promocoes"],
+        "summary": "Desativa uma promoção (ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Promoção desativada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Promocao" } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" },
+          "404": { "$ref": "#/components/responses/NaoEncontrado" }
+        }
+      }
+    },
+    "/auditoria": {
+      "get": {
+        "tags": ["Auditoria"],
+        "summary": "Consulta logs de auditoria de ações sensíveis (ADMIN)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "entidade", "in": "query", "schema": { "type": "string", "example": "pedido" } },
+          { "name": "entidadeId", "in": "query", "schema": { "type": "integer", "example": 1 } },
+          { "name": "acao", "in": "query", "schema": { "type": "string", "example": "STATUS_PEDIDO_ALTERADO" } },
+          { "$ref": "#/components/parameters/page" },
+          { "$ref": "#/components/parameters/limit" }
+        ],
+        "responses": {
+          "200": { "description": "Lista paginada", "content": { "application/json": { "schema": { "type": "object", "properties": { "dados": { "type": "array", "items": { "$ref": "#/components/schemas/LogAuditoria" } }, "paginacao": { "$ref": "#/components/schemas/Paginacao" } } } } } },
+          "401": { "$ref": "#/components/responses/NaoAutenticado" },
+          "403": { "$ref": "#/components/responses/SemPermissao" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "parameters": {
+      "id": { "name": "id", "in": "path", "required": true, "schema": { "type": "integer", "example": 1 } },
+      "page": { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 } },
+      "limit": { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 10, "minimum": 1, "maximum": 50 } }
+    },
+    "responses": {
+      "ErroValidacao": {
+        "description": "Dados inválidos",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" }, "example": { "error": "VALIDACAO", "message": "Os dados enviados são inválidos.", "details": [{ "field": "email", "issue": "E-mail em formato inválido." }], "timestamp": "2026-10-12T12:00:00.000Z", "path": "/usuarios", "requestId": "4f1c2a7e-0d7b-4a52-9a4e-2f3c0e9b1a11" } } }
+      },
+      "NaoAutenticado": {
+        "description": "Token ausente ou inválido",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" }, "example": { "error": "TOKEN_AUSENTE", "message": "É necessário enviar o token de acesso no cabeçalho Authorization.", "details": [], "timestamp": "2026-10-12T12:00:00.000Z", "path": "/pedidos", "requestId": "4f1c2a7e-0d7b-4a52-9a4e-2f3c0e9b1a11" } } }
+      },
+      "SemPermissao": {
+        "description": "Perfil sem permissão",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" }, "example": { "error": "ACESSO_NEGADO", "message": "Seu perfil não tem permissão para acessar este recurso.", "details": [], "timestamp": "2026-10-12T12:00:00.000Z", "path": "/pedidos/1/status", "requestId": "4f1c2a7e-0d7b-4a52-9a4e-2f3c0e9b1a11" } } }
+      },
+      "NaoEncontrado": {
+        "description": "Recurso não encontrado",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" }, "example": { "error": "PRODUTO_NAO_ENCONTRADO", "message": "Um ou mais produtos não foram encontrados.", "details": [{ "field": "itens[0].produtoId", "issue": "Produto 999 não existe." }], "timestamp": "2026-10-12T12:00:00.000Z", "path": "/pedidos", "requestId": "4f1c2a7e-0d7b-4a52-9a4e-2f3c0e9b1a11" } } }
+      },
+      "Conflito": {
+        "description": "Conflito com regra de negócio",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" }, "example": { "error": "TRANSICAO_DE_STATUS_INVALIDA", "message": "Não é possível alterar o pedido de ENTREGUE para EM_PREPARO.", "details": [], "timestamp": "2026-10-12T12:00:00.000Z", "path": "/pedidos/1/status", "requestId": "4f1c2a7e-0d7b-4a52-9a4e-2f3c0e9b1a11" } } }
+      }
+    },
+    "schemas": {
+      "Erro": {
+        "type": "object",
+        "description": "Formato padrão de erro usado em todas as falhas da API",
+        "properties": {
+          "error": { "type": "string", "example": "NOME_DO_ERRO" },
+          "message": { "type": "string", "example": "Mensagem legível" },
+          "details": { "type": "array", "items": { "type": "object", "properties": { "field": { "type": "string" }, "issue": { "type": "string" } } } },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "path": { "type": "string", "example": "/rota" },
+          "requestId": { "type": "string", "format": "uuid" }
+        }
+      },
+      "Paginacao": {
+        "type": "object",
+        "properties": { "pagina": { "type": "integer", "example": 1 }, "limite": { "type": "integer", "example": 10 }, "total": { "type": "integer", "example": 25 }, "totalPaginas": { "type": "integer", "example": 3 } }
+      },
+      "Perfil": { "type": "string", "enum": ["CLIENTE", "ATENDENTE", "COZINHA", "GERENTE", "ADMIN"] },
+      "CanalPedido": { "type": "string", "enum": ["APP", "TOTEM", "BALCAO", "PICKUP", "WEB"] },
+      "StatusPedido": { "type": "string", "enum": ["AGUARDANDO_PAGAMENTO", "RECEBIDO", "EM_PREPARO", "PRONTO", "ENTREGUE", "CANCELADO"] },
+      "FormaPagamento": { "type": "string", "enum": ["PIX", "CARTAO_CREDITO", "CARTAO_DEBITO", "DINHEIRO", "MOCK"] },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "senha"],
+        "properties": { "email": { "type": "string", "format": "email" }, "senha": { "type": "string" } }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "accessToken": { "type": "string", "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+          "tokenType": { "type": "string", "example": "Bearer" },
+          "expiresIn": { "type": "integer", "example": 3600 },
+          "user": { "type": "object", "properties": { "id": { "type": "integer", "example": 6 }, "nome": { "type": "string", "example": "Maria Cliente" }, "perfil": { "$ref": "#/components/schemas/Perfil" }, "unidadeId": { "type": "integer", "nullable": true } } }
+        }
+      },
+      "CadastroCliente": {
+        "type": "object",
+        "required": ["nome", "email", "senha"],
+        "properties": {
+          "nome": { "type": "string", "minLength": 3 },
+          "email": { "type": "string", "format": "email" },
+          "senha": { "type": "string", "minLength": 8, "description": "Mínimo de 8 caracteres com letras e números" },
+          "telefone": { "type": "string", "example": "81988887777", "description": "Opcional. DDD + número, somente dígitos" },
+          "consentimentoFidelidade": { "type": "boolean", "default": false }
+        }
+      },
+      "CadastroFuncionario": {
+        "type": "object",
+        "required": ["nome", "email", "senha", "perfil"],
+        "properties": {
+          "nome": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "senha": { "type": "string" },
+          "perfil": { "type": "string", "enum": ["ATENDENTE", "COZINHA", "GERENTE", "ADMIN"] },
+          "unidadeId": { "type": "integer", "description": "Obrigatório para ATENDENTE, COZINHA e GERENTE" }
+        }
+      },
+      "Usuario": {
+        "type": "object",
+        "description": "A senha (hash) nunca é retornada",
+        "properties": {
+          "id": { "type": "integer" },
+          "nome": { "type": "string" },
+          "email": { "type": "string" },
+          "perfil": { "$ref": "#/components/schemas/Perfil" },
+          "unidadeId": { "type": "integer", "nullable": true },
+          "criadoEm": { "type": "string", "format": "date-time" },
+          "cliente": {
+            "type": "object",
+            "nullable": true,
+            "properties": { "id": { "type": "integer" }, "telefone": { "type": "string", "nullable": true }, "pontosFidelidade": { "type": "integer" }, "consentimentoFidelidade": { "type": "boolean" }, "dataConsentimento": { "type": "string", "format": "date-time", "nullable": true } }
+          }
+        }
+      },
+      "UsuarioResumo": {
+        "type": "object",
+        "properties": { "id": { "type": "integer" }, "nome": { "type": "string" }, "email": { "type": "string" }, "perfil": { "$ref": "#/components/schemas/Perfil" }, "unidadeId": { "type": "integer", "nullable": true }, "ativo": { "type": "boolean" } }
+      },
+      "UnidadeEntrada": {
+        "type": "object",
+        "required": ["nome", "cep", "cidade", "estado"],
+        "properties": { "nome": { "type": "string" }, "cep": { "type": "string", "example": "51020-000" }, "cidade": { "type": "string" }, "estado": { "type": "string", "example": "PE" } }
+      },
+      "Unidade": {
+        "type": "object",
+        "properties": { "id": { "type": "integer" }, "nome": { "type": "string" }, "cep": { "type": "string" }, "cidade": { "type": "string" }, "estado": { "type": "string" }, "ativa": { "type": "boolean" }, "criadoEm": { "type": "string", "format": "date-time" }, "atualizadoEm": { "type": "string", "format": "date-time" } }
+      },
+      "ProdutoEntrada": {
+        "type": "object",
+        "required": ["nome", "preco", "categoria"],
+        "properties": { "nome": { "type": "string" }, "descricao": { "type": "string" }, "preco": { "type": "number", "example": 39.9 }, "categoria": { "type": "string", "example": "PRATO_PRINCIPAL" } }
+      },
+      "Produto": {
+        "type": "object",
+        "properties": { "id": { "type": "integer" }, "nome": { "type": "string" }, "descricao": { "type": "string", "nullable": true }, "preco": { "type": "number", "example": 39.9 }, "categoria": { "type": "string" }, "ativo": { "type": "boolean" } }
+      },
+      "Cardapio": {
+        "type": "object",
+        "properties": {
+          "unidade": { "type": "object", "properties": { "id": { "type": "integer" }, "nome": { "type": "string" } } },
+          "itens": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "produtoId": { "type": "integer" },
+                "nome": { "type": "string" },
+                "descricao": { "type": "string" },
+                "categoria": { "type": "string" },
+                "preco": { "type": "number", "example": 7.5 },
+                "precoPromocional": { "type": "number", "nullable": true, "example": 6 },
+                "promocao": { "type": "object", "nullable": true, "properties": { "id": { "type": "integer" }, "nome": { "type": "string" }, "percentualDesconto": { "type": "integer" } } },
+                "disponivel": { "type": "boolean" },
+                "quantidadeDisponivel": { "type": "integer" }
+              }
+            }
+          }
+        }
+      },
+      "ItemEstoque": {
+        "type": "object",
+        "properties": { "estoqueId": { "type": "integer" }, "unidadeId": { "type": "integer" }, "produtoId": { "type": "integer" }, "produto": { "type": "string" }, "quantidade": { "type": "integer" }, "atualizadoEm": { "type": "string", "format": "date-time" } }
+      },
+      "MovimentacaoEstoqueEntrada": {
+        "type": "object",
+        "required": ["unidadeId", "produtoId", "quantidade", "motivo"],
+        "properties": { "unidadeId": { "type": "integer" }, "produtoId": { "type": "integer" }, "quantidade": { "type": "integer", "minimum": 1 }, "motivo": { "type": "string" } }
+      },
+      "ResultadoMovimentacao": {
+        "type": "object",
+        "properties": { "movimentacaoId": { "type": "integer" }, "tipo": { "type": "string", "enum": ["ENTRADA", "SAIDA"] }, "estoqueId": { "type": "integer" }, "saldoAtual": { "type": "integer" } }
+      },
+      "CriarPedido": {
+        "type": "object",
+        "required": ["unidadeId", "canalPedido", "formaPagamento", "itens"],
+        "properties": {
+          "unidadeId": { "type": "integer" },
+          "canalPedido": { "$ref": "#/components/schemas/CanalPedido" },
+          "clienteId": { "type": "integer", "description": "Usado por ATENDENTE/GERENTE/ADMIN para vincular o pedido a um cliente. Para CLIENTE é ignorado" },
+          "formaPagamento": { "$ref": "#/components/schemas/FormaPagamento" },
+          "observacao": { "type": "string" },
+          "pontosResgatados": { "type": "integer", "minimum": 0, "description": "Cada 10 pontos equivalem a R$ 1,00 de desconto. Exige consentimento" },
+          "itens": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["produtoId", "quantidade"], "properties": { "produtoId": { "type": "integer" }, "quantidade": { "type": "integer", "minimum": 1 } } } }
+        }
+      },
+      "Pedido": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "example": 1 },
+          "unidadeId": { "type": "integer", "example": 1 },
+          "clienteId": { "type": "integer", "nullable": true, "example": 1 },
+          "canalPedido": { "$ref": "#/components/schemas/CanalPedido" },
+          "status": { "$ref": "#/components/schemas/StatusPedido" },
+          "formaPagamento": { "$ref": "#/components/schemas/FormaPagamento" },
+          "subtotal": { "type": "number", "example": 129.7 },
+          "desconto": { "type": "number", "example": 0 },
+          "total": { "type": "number", "example": 129.7 },
+          "pontosUsados": { "type": "integer", "example": 0 },
+          "observacao": { "type": "string", "nullable": true },
+          "itens": {
+            "type": "array",
+            "items": { "type": "object", "properties": { "produtoId": { "type": "integer", "example": 1 }, "nome": { "type": "string", "example": "Baião de Dois" }, "quantidade": { "type": "integer", "example": 2 }, "precoUnitario": { "type": "number", "example": 39.9 }, "desconto": { "type": "number", "example": 0 }, "promocaoId": { "type": "integer", "nullable": true } } }
+          },
+          "criadoPorId": { "type": "integer" },
+          "criadoEm": { "type": "string", "format": "date-time" },
+          "atualizadoEm": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AtualizarStatus": {
+        "type": "object",
+        "required": ["status"],
+        "properties": { "status": { "type": "string", "enum": ["EM_PREPARO", "PRONTO", "ENTREGUE"] } }
+      },
+      "CancelarPedido": {
+        "type": "object",
+        "properties": { "motivo": { "type": "string" } }
+      },
+      "SolicitarPagamento": {
+        "type": "object",
+        "required": ["pedidoId"],
+        "properties": { "pedidoId": { "type": "integer" }, "simulacao": { "type": "string", "enum": ["APROVAR", "RECUSAR", "FALHAR"], "default": "APROVAR" } }
+      },
+      "Pagamento": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "pedidoId": { "type": "integer" },
+          "valor": { "type": "number" },
+          "formaPagamento": { "$ref": "#/components/schemas/FormaPagamento" },
+          "status": { "type": "string", "enum": ["APROVADO", "RECUSADO", "FALHA", "ESTORNADO"] },
+          "codigoTransacao": { "type": "string", "nullable": true, "example": "MOCK-1b2978f9-5371-4581-8699-02fab95f6bce" },
+          "mensagem": { "type": "string" },
+          "criadoEm": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ResultadoPagamento": {
+        "type": "object",
+        "properties": {
+          "pagamento": { "$ref": "#/components/schemas/Pagamento" },
+          "pedido": { "type": "object", "properties": { "id": { "type": "integer" }, "status": { "type": "string", "example": "RECEBIDO" } } },
+          "pontosGanhos": { "type": "integer", "example": 129 },
+          "respostaGateway": {
+            "type": "object",
+            "description": "Payload devolvido pelo gateway mock",
+            "properties": { "codigoTransacao": { "type": "string" }, "status": { "type": "string" }, "mensagem": { "type": "string" }, "valor": { "type": "number" }, "processadoEm": { "type": "string", "format": "date-time" } }
+          }
+        }
+      },
+      "SaldoFidelidade": {
+        "type": "object",
+        "properties": {
+          "clienteId": { "type": "integer" },
+          "pontos": { "type": "integer", "example": 150 },
+          "valorEmReais": { "type": "number", "example": 15 },
+          "consentimentoFidelidade": { "type": "boolean" },
+          "dataConsentimento": { "type": "string", "format": "date-time", "nullable": true },
+          "regras": { "type": "object", "properties": { "pontosPorRealGasto": { "type": "integer", "example": 1 }, "valorDeCadaPonto": { "type": "number", "example": 0.1 } } }
+        }
+      },
+      "MovimentacaoFidelidade": {
+        "type": "object",
+        "properties": { "id": { "type": "integer" }, "clienteId": { "type": "integer" }, "pedidoId": { "type": "integer", "nullable": true }, "tipo": { "type": "string", "enum": ["CREDITO", "DEBITO"] }, "pontos": { "type": "integer" }, "descricao": { "type": "string" }, "criadoEm": { "type": "string", "format": "date-time" } }
+      },
+      "PromocaoEntrada": {
+        "type": "object",
+        "required": ["nome", "produtoId", "percentualDesconto", "dataInicio", "dataFim"],
+        "properties": { "nome": { "type": "string" }, "produtoId": { "type": "integer" }, "unidadeId": { "type": "integer" }, "percentualDesconto": { "type": "integer", "minimum": 1, "maximum": 90 }, "dataInicio": { "type": "string", "format": "date" }, "dataFim": { "type": "string", "format": "date" } }
+      },
+      "Promocao": {
+        "type": "object",
+        "properties": { "id": { "type": "integer" }, "nome": { "type": "string" }, "produtoId": { "type": "integer" }, "unidadeId": { "type": "integer", "nullable": true }, "percentualDesconto": { "type": "integer" }, "dataInicio": { "type": "string", "format": "date-time" }, "dataFim": { "type": "string", "format": "date-time" }, "ativa": { "type": "boolean" } }
+      },
+      "LogAuditoria": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "usuarioId": { "type": "integer", "nullable": true },
+          "acao": { "type": "string", "example": "STATUS_PEDIDO_ALTERADO" },
+          "entidade": { "type": "string", "example": "pedido" },
+          "entidadeId": { "type": "integer", "nullable": true },
+          "detalhes": { "type": "object", "example": { "statusAnterior": "RECEBIDO", "novoStatus": "EM_PREPARO" } },
+          "criadoEm": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}
